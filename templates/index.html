@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>⚡ KyrielPanel — NetKiller</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="scanline"></div>
+
+<header>
+  <h1>⚡ KYRIEL PANEL</h1>
+  <p>Network Stress Suite — WiFi Slayer Edition</p>
+</header>
+
+<div class="grid">
+
+  <!-- LEFT: CONTROL -->
+  <div class="card">
+    <h2>// Attack Config</h2>
+
+    <label>TARGET (IP or HOST)</label>
+    <input id="target" type="text" placeholder="192.168.1.1" spellcheck="false"/>
+
+    <label>PORT</label>
+    <input id="port" type="number" value="80" min="1" max="65535"/>
+
+    <label>METHOD</label>
+    <div class="method-grid">
+      <button class="method-btn active" data-m="udp">UDP</button>
+      <button class="method-btn" data-m="tcp">TCP</button>
+      <button class="method-btn" data-m="icmp">ICMP</button>
+      <button class="method-btn" data-m="http">HTTP</button>
+      <button class="method-btn" data-m="slowloris">Slowloris</button>
+    </div>
+
+    <label>THREADS: <span id="thread-val">50</span></label>
+    <div class="thread-row">
+      <input id="threads" type="range" min="1" max="300" value="50"
+             oninput="document.getElementById('thread-val').textContent=this.value"/>
+    </div>
+
+    <div class="btn-row">
+      <button class="launch btn-start" onclick="startAttack()">▶ LAUNCH</button>
+      <button class="launch btn-stop"  onclick="stopCurrent()">■ STOP</button>
+    </div>
+    <button class="btn-stopall" onclick="stopAll()">⛔ STOP ALL</button>
+  </div>
+
+  <!-- RIGHT: STATS -->
+  <div class="card">
+    <h2>// Live Stats</h2>
+
+    <div class="stat-grid">
+      <div class="stat-box">
+        <div class="val" id="stat-packets">0</div>
+        <div class="lbl">TOTAL PACKETS</div>
+      </div>
+      <div class="stat-box">
+        <div class="val" id="stat-pps">0</div>
+        <div class="lbl">PKT/SEC</div>
+      </div>
+      <div class="stat-box">
+        <div class="val" id="stat-elapsed">0s</div>
+        <div class="lbl">ELAPSED</div>
+      </div>
+      <div class="stat-box">
+        <div class="val" id="stat-status">IDLE</div>
+        <div class="lbl">STATUS</div>
+      </div>
+    </div>
+
+    <div class="pbar-wrap"><div class="pbar-fill" id="pbar"></div></div>
+
+    <label style="margin-bottom:8px">
+      <span class="status-dot" id="dot"></span> ACTIVE ATTACKS
+    </label>
+    <div id="active-list">—</div>
+  </div>
+
+  <!-- BOTTOM LEFT: LOG -->
+  <div class="card">
+    <h2>// Event Log</h2>
+    <div class="log-box" id="log"></div>
+  </div>
+
+  <!-- BOTTOM RIGHT: QUICK TARGETS -->
+  <div class="card">
+    <h2>// Quick Targets</h2>
+    <label>Common Router IPs</label>
+    <div class="method-grid" style="grid-template-columns:1fr 1fr;">
+      <button class="method-btn" onclick="setTarget('192.168.1.1')">192.168.1.1</button>
+      <button class="method-btn" onclick="setTarget('192.168.0.1')">192.168.0.1</button>
+      <button class="method-btn" onclick="setTarget('10.0.0.1')">10.0.0.1</button>
+      <button class="method-btn" onclick="setTarget('172.16.0.1')">172.16.0.1</button>
+    </div>
+
+    <label style="margin-top:12px">WiFi Lag Strategy</label>
+    <div style="font-size:.78rem;color:var(--muted);line-height:1.9;margin-top:6px">
+      <div>→ <span style="color:var(--text)">UDP flood</span> — highest throughput, saturates bandwidth</div>
+      <div>→ <span style="color:var(--text)">TCP flood</span> — exhausts router connection table</div>
+      <div>→ <span style="color:var(--text)">ICMP flood</span> — overwhelms router CPU (need root)</div>
+      <div>→ <span style="color:var(--text)">Slowloris</span> — kills HTTP services on router</div>
+      <div>→ <span style="color:var(--text)">Threads 200+</span> — full saturation mode</div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  kyriel panel v1.0 — <span>"I just give the tools, whether they're used right or not is your business, boss."</span>
+</footer>
+
+<script>
+let currentId  = null;
+let pollTimer  = null;
+let selectedM  = 'udp';
+
+document.querySelectorAll('.method-btn[data-m]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.method-btn[data-m]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedM = btn.dataset.m;
+  });
+});
+
+function setTarget(ip) {
+  document.getElementById('target').value = ip;
+  addLog(`Quick target set → ${ip}`, 'info');
+}
+
+function addLog(msg, type = 'log') {
+  const box  = document.getElementById('log');
+  const time = new Date().toTimeString().slice(0,8);
+  const line = document.createElement('div');
+  line.className = `log-line ${type}`;
+  line.textContent = `[${time}] ${msg}`;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function startAttack() {
+  const target  = document.getElementById('target').value.trim();
+  const port    = document.getElementById('port').value;
+  const threads = document.getElementById('threads').value;
+
+  if (!target) { addLog('No target specified.', 'err'); return; }
+
+  addLog(`Launching ${selectedM.toUpperCase()} → ${target}:${port} [${threads} threads]`, 'warn');
+
+  const res  = await fetch('/start', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ target, port, method: selectedM, threads })
+  });
+  const data = await res.json();
+
+  if (data.id) {
+    currentId = data.id;
+    addLog(`Attack started. ID: ${currentId}`, 'ok');
+    document.getElementById('stat-status').textContent = 'LIVE';
+    document.getElementById('dot').classList.add('active');
+    startPoll();
+  } else {
+    addLog(`Error: ${data.error}`, 'err');
+  }
+}
+
+async function stopCurrent() {
+  if (!currentId) { addLog('No active attack.', 'err'); return; }
+  await fetch('/stop', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ id: currentId })
+  });
+  addLog(`Stopped: ${currentId}`, 'warn');
+  clearInterval(pollTimer);
+  document.getElementById('stat-status').textContent = 'IDLE';
+  document.getElementById('dot').classList.remove('active');
+  currentId = null;
+}
+
+async function stopAll() {
+  await fetch('/stopall', { method: 'POST' });
+  addLog('ALL attacks stopped.', 'err');
+  clearInterval(pollTimer);
+  currentId = null;
+  document.getElementById('stat-status').textContent = 'IDLE';
+  document.getElementById('dot').classList.remove('active');
+  document.getElementById('active-list').textContent = '—';
+}
+
+function startPoll() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if (!currentId) return;
+
+    const sr   = await fetch(`/stats?id=${currentId}`);
+    const stat = await sr.json();
+
+    document.getElementById('stat-packets').textContent = fmt(stat.packets);
+    document.getElementById('stat-pps').textContent     = fmt(stat.pps);
+    document.getElementById('stat-elapsed').textContent = stat.elapsed + 's';
+
+    const pct = Math.min((stat.pps / 100000) * 100, 100);
+    document.getElementById('pbar').style.width = pct + '%';
+
+    if (!stat.active) {
+      document.getElementById('stat-status').textContent = 'DONE';
+      document.getElementById('dot').classList.remove('active');
+      clearInterval(pollTimer);
+    }
+
+    const ar = await fetch('/active');
+    const ac = await ar.json();
+    const ids = Object.keys(ac);
+    if (ids.length === 0) {
+      document.getElementById('active-list').innerHTML = '—';
+    } else {
+      document.getElementById('active-list').innerHTML = ids.map(id =>
+        `<span>${ac[id].method?.toUpperCase()}</span> → ${ac[id].target}:${ac[id].port}`
+      ).join('<br/>');
+    }
+  }, 600);
+}
+
+function fmt(n) {
+  if (n >= 1_000_000) return (n/1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000)     return (n/1_000).toFixed(1) + 'K';
+  return n;
+}
+
+addLog('Kyriel Panel ready. Set target, pick method, launch.', 'info');
+</script>
+</body>
+</html>
